@@ -1,7 +1,8 @@
 import sys
 import OpenGL.GL as gl
 import OpenGL.GLUT as glut
-
+import numpy as np
+import ctypes
 
 class Shader:
 	def __init__(self, vertex_code, fragment_code):
@@ -45,6 +46,75 @@ class Shader:
 		gl.glUseProgram(0)
 
 
+SIZE_FLOAT = 4
+class Batch:
+	def __init__(self, n, shader):
+		self.max_quad = n
+		self.quad_index = 0
+		self.shader = shader
+
+		self.quadVA = 0
+		gl.glCreateVertexArrays(1, self.quadVA)
+		self.quadVB = gl.glGenBuffers(1)
+		self.quadIB = gl.glGenBuffers(1)
+		gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.quadVB)
+		gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.quadIB)
+
+		layout = (2, 4)
+		stride = sum(layout)
+		names  = ("a_position", "a_color")
+		self.stride = stride
+
+		self.quad_buffer = np.zeros(n*4*stride, dtype=np.float32)
+		index_buffer = np.zeros(n*6, dtype=np.uint16)
+
+		gl.glBindVertexArray(self.quadVA)
+
+		offset = 0
+		for size, name in zip(layout, names):
+			loc = gl.glGetAttribLocation(shader.program, name)
+			gl.glEnableVertexAttribArray(loc)
+			gl.glVertexAttribPointer(loc, size, gl.GL_FLOAT, False, stride*SIZE_FLOAT, ctypes.c_void_p(offset*SIZE_FLOAT))
+			offset += size
+		gl.glBufferData(gl.GL_ARRAY_BUFFER, self.quad_buffer.nbytes, self.quad_buffer, gl.GL_DYNAMIC_DRAW)
+
+		offset = 0
+		for i in range(n):
+			index_buffer[i*6+0] = offset+0
+			index_buffer[i*6+1] = offset+1
+			index_buffer[i*6+2] = offset+2
+
+			index_buffer[i*6+3] = offset+0
+			index_buffer[i*6+4] = offset+2
+			index_buffer[i*6+5] = offset+3
+			offset += 4
+		gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, index_buffer, gl.GL_STATIC_DRAW)
+
+	def draw(self, x, y, w, h, r, g, b, a=1):
+		if self.quad_index >= self.max_quad:
+			self.flush()
+		i = self.quad_index*4*self.stride
+		for dx, dy in [(0, 0), (1, 0), (1, 1), (0, 1)]:
+			self.quad_buffer[i+0] = x+dx*w
+			self.quad_buffer[i+1] = y+dy*h
+			self.quad_buffer[i+2] = r
+			self.quad_buffer[i+3] = g
+			self.quad_buffer[i+4] = b
+			self.quad_buffer[i+5] = a
+			i += self.stride
+		self.quad_index += 1
+
+	def flush(self):
+		gl.glBindVertexArray(self.quadVA)
+		self.shader.bind()
+		gl.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, self.quad_index*4*self.stride*SIZE_FLOAT, self.quad_buffer)
+		gl.glDrawElements(gl.GL_TRIANGLES, self.quad_index*6, gl.GL_UNSIGNED_SHORT, None)
+		self.begin_batch()
+
+	def begin_batch(self):
+		self.quad_index = 0
+
+
 class App:
 	def __init__(self, title, width, height):
 		self.width = width
@@ -56,12 +126,20 @@ class App:
 		glut.glutReshapeFunc(self.reshape)
 		glut.glutDisplayFunc(self.display)
 		glut.glutKeyboardFunc(self.keyboard)
+		
+	def init(self, batch):
+		self.batch = batch
 
 	def start(self):
 		glut.glutMainLoop()
 
 	def display(self):
 		gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+
+		for i in range(50):
+			self.batch.draw(i/100, i/100, 1/100, 1/100, 1, 0, 1)
+		self.batch.flush()
+
 		glut.glutSwapBuffers()
 
 	def reshape(self, width, height):
@@ -74,13 +152,13 @@ class App:
 
 app = App("Hello", 512, 512)
 shader = Shader("""
-attribute vec2 position;
-attribute vec4 color;
+attribute vec2 a_position;
+attribute vec4 a_color;
 varying vec4 v_color;
 void main()
 {
-	gl_Position = vec4(position, 0.0, 1.0);
-	v_color = color;
+	gl_Position = vec4(a_position, 0.0, 1.0);
+	v_color = a_color;
 }
 ""","""
 varying vec4 v_color;
@@ -89,4 +167,6 @@ void main()
 	gl_FragColor = vec4(v_color);
 }
 """)
+batch = Batch(1000, shader)
+app.init(batch)
 app.start()
