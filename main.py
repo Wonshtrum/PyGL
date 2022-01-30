@@ -39,6 +39,18 @@ class Shader:
 
 		self.program = program
 
+		count = gl.glGetProgramiv(program, gl.GL_ACTIVE_UNIFORMS)
+		self.uniforms = {name.decode(): i for i, (name, _, _) in enumerate(gl.glGetActiveUniform(program, i) for i in range(count))}
+	
+	def __getattribute__(self, name):
+		if name.startswith("glUniform"):
+			return lambda uniform, *args: self.set_uniform(name, uniform, *args)
+		return object.__getattribute__(self, name)
+
+	def set_uniform(self, method, uniform, *args):
+		self.bind()
+		object.__getattribute__(gl, method)(self.uniforms[uniform], *args)
+
 	def bind(self):
 		gl.glUseProgram(self.program)
 
@@ -48,10 +60,11 @@ class Shader:
 
 SIZE_FLOAT = 4
 class Batch:
-	def __init__(self, n, shader):
+	def __init__(self, n, shader, layout=None):
 		self.max_quad = n
 		self.quad_index = 0
 		self.shader = shader
+		layout = layout or [(2, "a_position"), (4, "a_color")]
 
 		self.quadVA = 0
 		gl.glCreateVertexArrays(1, self.quadVA)
@@ -60,9 +73,8 @@ class Batch:
 		gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.quadVB)
 		gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.quadIB)
 
-		layout = (2, 4)
+		layout, names  = zip(*layout)
 		stride = sum(layout)
-		names  = ("a_position", "a_color")
 		self.stride = stride
 
 		self.quad_buffer = np.zeros(n*4*stride, dtype=np.float32)
@@ -126,6 +138,7 @@ class App:
 		glut.glutReshapeFunc(self.reshape)
 		glut.glutDisplayFunc(self.display)
 		glut.glutKeyboardFunc(self.keyboard)
+		self.i = 0
 		
 	def init(self, batch):
 		self.batch = batch
@@ -134,15 +147,19 @@ class App:
 		glut.glutMainLoop()
 
 	def display(self):
+		self.i += 1
+		i = self.i
+		gl.glClearColor((i%4)/4, (i%7)/7, (i%9)/9, 1)
 		gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
 		for i in range(50):
-			self.batch.draw(i/100, i/100, 1/100, 1/100, 1, 0, 1)
+			self.batch.draw(i*100, i*100, 1*100, 1*100, 1, 0, 1)
 		self.batch.flush()
 
 		glut.glutSwapBuffers()
 
 	def reshape(self, width, height):
+		shader.glUniform4f("u_camera", width, height, 100, 100)
 		gl.glViewport(0, 0, width, height)
 
 	def keyboard(self, key, x, y):
@@ -155,18 +172,24 @@ shader = Shader("""
 attribute vec2 a_position;
 attribute vec4 a_color;
 varying vec4 v_color;
+
+uniform vec4 u_camera;
+uniform float u_zoom;
+
 void main()
 {
-	gl_Position = vec4(a_position, 0.0, 1.0);
+	gl_Position = vec4(((a_position-u_camera.zw)*u_zoom/u_camera.xy)*2., 0., 1.);
 	v_color = a_color;
 }
-""","""
+""", """
 varying vec4 v_color;
 void main()
 {
 	gl_FragColor = vec4(v_color);
 }
 """)
+shader.glUniform1f("u_zoom", 1)
 batch = Batch(1000, shader)
 app.init(batch)
+app.display()
 app.start()
