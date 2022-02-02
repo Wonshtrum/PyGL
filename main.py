@@ -3,6 +3,27 @@ import OpenGL.GL as gl
 import OpenGL.GLUT as glut
 import numpy as np
 import ctypes
+from PIL import Image
+
+
+class Texture:
+	def __init__(self, filename, id=0):
+		img = Image.open(filename)
+		img_data = np.array(img.getdata(), np.int8)
+		self.id = gl.glGenTextures(1)
+		gl.glActiveTexture(gl.GL_TEXTURE0+id)
+		gl.glBindTexture(gl.GL_TEXTURE_2D, self.id)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+		gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, img.size[0], img.size[1], 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, img_data)
+
+	def bind(self, id=0):
+		gl.glActiveTexture(gl.GL_TEXTURE0+id)
+		gl.glBindTexture(gl.GL_TEXTURE_2D, self.id)
+		return id
+
 
 class Shader:
 	def __init__(self, vertex_code, fragment_code):
@@ -41,6 +62,7 @@ class Shader:
 
 		count = gl.glGetProgramiv(program, gl.GL_ACTIVE_UNIFORMS)
 		self.uniforms = {name.decode(): i for i, (name, _, _) in enumerate(gl.glGetActiveUniform(program, i) for i in range(count))}
+		print(" - "+"\n - ".join(self.uniforms.keys()))
 	
 	def __getattribute__(self, name):
 		if name.startswith("glUniform"):
@@ -50,6 +72,10 @@ class Shader:
 	def set_uniform(self, method, uniform, *args):
 		self.bind()
 		object.__getattribute__(gl, method)(self.uniforms[uniform], *args)
+
+	def set_texture(self, uniform, texture):
+		self.bind()
+		gl.glUniform1i(self.uniforms[uniform], texture.id)
 
 	def bind(self):
 		gl.glUseProgram(self.program)
@@ -64,7 +90,7 @@ class Batch:
 		self.max_quad = n
 		self.quad_index = 0
 		self.shader = shader
-		layout = layout or [(2, "a_position"), (4, "a_color")]
+		layout = layout or [(2, "a_position"), (2, "a_texcoord"), (4, "a_color")]
 
 		self.quadVA = 0
 		gl.glCreateVertexArrays(1, self.quadVA)
@@ -88,6 +114,10 @@ class Batch:
 			gl.glEnableVertexAttribArray(loc)
 			gl.glVertexAttribPointer(loc, size, gl.GL_FLOAT, False, stride*SIZE_FLOAT, ctypes.c_void_p(offset*SIZE_FLOAT))
 			offset += size
+		for i in range(0, n, 4):
+			for j, (dx, dy) in enumerate([(0, 1), (1, 1), (1, 0), (0, 0)]):
+				self.quad_buffer[(i+j)*stride+2] = dx
+				self.quad_buffer[(i+j)*stride+3] = dy
 		gl.glBufferData(gl.GL_ARRAY_BUFFER, self.quad_buffer.nbytes, self.quad_buffer, gl.GL_DYNAMIC_DRAW)
 
 		offset = 0
@@ -102,18 +132,16 @@ class Batch:
 			offset += 4
 		gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, index_buffer, gl.GL_STATIC_DRAW)
 
-	def draw(self, x, y, w, h, r, g, b, a=1):
+	def draw(self, x, y, w, h, *args):
 		if self.quad_index >= self.max_quad:
 			self.flush()
-		i = self.quad_index*4*self.stride
+		stride = self.stride
+		i = self.quad_index*4*stride
 		for dx, dy in [(0, 0), (1, 0), (1, 1), (0, 1)]:
 			self.quad_buffer[i+0] = x+dx*w
 			self.quad_buffer[i+1] = y+dy*h
-			self.quad_buffer[i+2] = r
-			self.quad_buffer[i+3] = g
-			self.quad_buffer[i+4] = b
-			self.quad_buffer[i+5] = a
-			i += self.stride
+			self.quad_buffer[i+4:i+stride] = args
+			i += stride
 		self.quad_index += 1
 
 	def flush(self):
@@ -153,7 +181,7 @@ class App:
 		gl.glClear(gl.GL_COLOR_BUFFER_BIT)
 
 		for i in range(50):
-			self.batch.draw(i*100, i*100, 1*100, 1*100, 1, 0, 1)
+			self.batch.draw(i*100, i*100, 1*100, 1*100, 1, 0, 1, 1)
 		self.batch.flush()
 
 		glut.glutSwapBuffers()
@@ -170,26 +198,38 @@ class App:
 app = App("Hello", 512, 512)
 shader = Shader("""
 attribute vec2 a_position;
+attribute vec2 a_texcoord;
 attribute vec4 a_color;
-varying vec4 v_color;
 
 uniform vec4 u_camera;
 uniform float u_zoom;
 
+varying vec2 v_texcoord;
+varying vec4 v_color;
+
 void main()
 {
 	gl_Position = vec4(((a_position-u_camera.zw)*u_zoom/u_camera.xy)*2., 0., 1.);
+	v_texcoord = a_texcoord;
 	v_color = a_color;
 }
 """, """
+uniform sampler2D u_tex;
+
+varying vec2 v_texcoord;
 varying vec4 v_color;
+
 void main()
 {
-	gl_FragColor = vec4(v_color);
+	gl_FragColor = vec4(v_color)*texture2D(u_tex, v_texcoord);
 }
 """)
-shader.glUniform1f("u_zoom", 1)
 batch = Batch(1000, shader)
+tex = Texture("img.png")
+
+shader.glUniform1f("u_zoom", 1)
+shader.glUniform1i("u_tex", tex.bind(0))
+
 app.init(batch)
 app.display()
 app.start()
