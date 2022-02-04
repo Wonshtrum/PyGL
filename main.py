@@ -4,25 +4,41 @@ import OpenGL.GLUT as glut
 import numpy as np
 import ctypes
 from PIL import Image
+from time import time
+
+
+# INITIALISATION
+glut.glutInit()
+glut.glutInitDisplayMode(glut.GLUT_DOUBLE | glut.GLUT_RGBA)
+WINDOW = glut.glutCreateWindow("")
 
 
 class Texture:
-	def __init__(self, filename, id=0):
+	def __init__(self, id):
+		self.id = id
+
+	def from_file(filename, *args):
 		img = Image.open(filename)
-		img_data = np.array(img.getdata(), np.int8)
-		self.id = gl.glGenTextures(1)
-		gl.glActiveTexture(gl.GL_TEXTURE0+id)
-		gl.glBindTexture(gl.GL_TEXTURE_2D, self.id)
-		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP)
-		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP)
-		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
-		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
-		gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, img.size[0], img.size[1], 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, img_data)
+		img_data = np.array(img.getdata(), np.uint8)
+		return Texture.from_data(img_data, img.size[0], img.size[1], *args)
+
+	def from_data(img_data, width, height, attach=0, wrap_s=gl.GL_CLAMP, wrap_t=gl.GL_CLAMP, filter_mag=gl.GL_NEAREST, filter_min=gl.GL_NEAREST, from_format=gl.GL_RGB, to_format=gl.GL_RGB):
+		print(img_data)
+		id = gl.glGenTextures(1)
+		gl.glActiveTexture(gl.GL_TEXTURE0+attach)
+		gl.glBindTexture(gl.GL_TEXTURE_2D, id)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, wrap_s)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, wrap_t)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, filter_mag)
+		gl.glTexParameterf(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, filter_min)
+		gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, from_format, width, height, 0, to_format, gl.GL_UNSIGNED_BYTE, img_data)
+		return Texture(id)
 
 	def bind(self, id=0):
 		gl.glActiveTexture(gl.GL_TEXTURE0+id)
 		gl.glBindTexture(gl.GL_TEXTURE_2D, self.id)
 		return id
+Texture.white_texture = Texture.from_data(np.array([[255,255,255]], np.uint8), 1, 1)
 
 
 class Shader:
@@ -51,7 +67,7 @@ class Shader:
 		gl.glLinkProgram(program)
 
 		if not gl.glGetProgramiv(program, gl.GL_LINK_STATUS):
-			error = gl.glGetProgramInfoLog(program).decode()
+			error = gl.glGetProgramInfoLog(program)
 			print(error)
 			raise RuntimeError("Linking error")
 
@@ -143,6 +159,7 @@ class Batch:
 			self.quad_buffer[i+4:i+stride] = args
 			i += stride
 		self.quad_index += 1
+		glut.glutPostRedisplay()
 
 	def flush(self):
 		gl.glBindVertexArray(self.quadVA)
@@ -156,47 +173,59 @@ class Batch:
 
 
 class App:
-	def __init__(self, title, width, height):
+	instanciated = False
+	def __init__(self, title, width, height, r=0, g=0, b=0, a=1):
+		if App.instanciated:
+			raise RuntimeError("Only one app can be instanciated")
+		App.instanciated = True
 		self.width = width
 		self.height = height
-		glut.glutInit()
-		glut.glutInitDisplayMode(glut.GLUT_DOUBLE | glut.GLUT_RGBA)
-		glut.glutCreateWindow(title)
+		self.last_frame = time()
+		glut.glutSetWindowTitle(title)
 		glut.glutReshapeWindow(width, height)
-		glut.glutReshapeFunc(self.reshape)
-		glut.glutDisplayFunc(self.display)
-		glut.glutKeyboardFunc(self.keyboard)
-		self.i = 0
+		glut.glutReshapeFunc(self._reshape)
+		glut.glutDisplayFunc(self._display)
+		glut.glutKeyboardFunc(self._keyboard)
+		glut.glutMouseFunc(self.mouse_click)
+		glut.glutPassiveMotionFunc(self.mouse_move)
+		gl.glClearColor(r, g, b, a)
 		
-	def init(self, batch):
-		self.batch = batch
-
 	def start(self):
 		glut.glutMainLoop()
 
-	def display(self):
-		self.i += 1
-		i = self.i
-		gl.glClearColor((i%4)/4, (i%7)/7, (i%9)/9, 1)
+	def _display(self):
 		gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+		now = time()
+		dt = now-self.last_frame
+		glut.glutSetWindowTitle(f"{int(1/dt)} fps")
+		self.update(dt)
+		self.last_frame = now
+		glut.glutSwapBuffers()
 
+	def _reshape(self, width, height):
+		self.reshape(width, height)
+		gl.glViewport(0, 0, width, height)
+
+	def _keyboard(self, key, x, y):
+		if key == b'\x1b':
+			glut.glutDestroyWindow(WINDOW)
+		else:
+			self.keyboard(key, x, y)
+
+	def update(self, dt):
 		for i in range(50):
 			self.batch.draw(i*100, i*100, 1*100, 1*100, 1, 0, 1, 1)
 		self.batch.flush()
 
-		glut.glutSwapBuffers()
-
-	def reshape(self, width, height):
-		shader.glUniform4f("u_camera", width, height, 100, 100)
-		gl.glViewport(0, 0, width, height)
-
-	def keyboard(self, key, x, y):
-		if key == b'\x1b':
-			sys.exit()
+	def mouse_click(self, *args):
+		print(args)
+	def mouse_move(self, *args):
+		print(args)
+	def keyboard(self, *args):
+		print(args)
 
 
-app = App("Hello", 512, 512)
-shader = Shader("""
+base_vertex_shader = """
 attribute vec2 a_position;
 attribute vec2 a_texcoord;
 attribute vec4 a_color;
@@ -213,7 +242,8 @@ void main()
 	v_texcoord = a_texcoord;
 	v_color = a_color;
 }
-""", """
+"""
+base_fragment_shader = """
 uniform sampler2D u_tex;
 
 varying vec2 v_texcoord;
@@ -223,13 +253,18 @@ void main()
 {
 	gl_FragColor = vec4(v_color)*texture2D(u_tex, v_texcoord);
 }
-""")
-batch = Batch(1000, shader)
-tex = Texture("img.png")
+"""
+circle_fragment_shader = """
+uniform sampler2D u_tex;
 
-shader.glUniform1f("u_zoom", 1)
-shader.glUniform1i("u_tex", tex.bind(0))
+varying vec2 v_texcoord;
+varying vec4 v_color;
 
-app.init(batch)
-app.display()
-app.start()
+void main()
+{
+	if (distance(v_texcoord, vec2(0.5)) > 0.5) discard;
+	gl_FragColor = vec4(v_color)*texture2D(u_tex, v_texcoord);
+}
+"""
+base_shader = Shader(base_vertex_shader, base_fragment_shader)
+circle_shader = Shader(base_vertex_shader, circle_fragment_shader)
