@@ -1,6 +1,5 @@
-import sys
 import OpenGL.GL as gl
-import OpenGL.GLUT as glut
+import glfw
 import numpy as np
 import ctypes
 from PIL import Image
@@ -8,9 +7,13 @@ from time import time
 
 
 # INITIALISATION
-glut.glutInit()
-glut.glutInitDisplayMode(glut.GLUT_DOUBLE | glut.GLUT_RGBA)
-WINDOW = glut.glutCreateWindow("")
+glfw.init()
+#glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+#glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+#glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, gl.GL_TRUE)
+#glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+WINDOW = glfw.create_window(128, 128, "", None, None)
+glfw.make_context_current(WINDOW)
 
 
 class Texture:
@@ -159,7 +162,6 @@ class Batch:
 			self.quad_buffer[i+4:i+stride] = args
 			i += stride
 		self.quad_index += 1
-		glut.glutPostRedisplay()
 
 	def flush(self):
 		gl.glBindVertexArray(self.quadVA)
@@ -178,44 +180,52 @@ class App:
 		if App.instanciated:
 			raise RuntimeError("Only one app can be instanciated")
 		App.instanciated = True
+		self.title = title
 		self.width = width
 		self.height = height
 		self.last_frame = time()
-		glut.glutSetWindowTitle(title)
-		glut.glutReshapeWindow(width, height)
-		glut.glutReshapeFunc(self._reshape)
-		glut.glutDisplayFunc(self._display)
-		glut.glutKeyboardFunc(self._keyboard)
-		glut.glutMouseFunc(self.mouse_click)
-		glut.glutPassiveMotionFunc(self.mouse_move)
+		self.window = WINDOW
+
+		glfw.set_window_size_callback(self.window, self._reshape)
+		glfw.set_key_callback(self.window, self._keyboard)
+		glfw.set_mouse_button_callback(self.window, self.mouse_click)
+		glfw.set_cursor_pos_callback(self.window, self.mouse_move)
+		glfw.set_window_close_callback(self.window, self._close)
+
+		glfw.set_window_title(self.window, title)
+		glfw.set_window_size(self.window, width, height)
+
 		gl.glClearColor(r, g, b, a)
 		
 	def start(self):
-		glut.glutMainLoop()
-
-	def _display(self):
-		gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-		now = time()
-		dt = now-self.last_frame
-		glut.glutSetWindowTitle(f"{int(1/dt)} fps")
-		self.update(dt)
-		self.last_frame = now
-		glut.glutSwapBuffers()
-
-	def _reshape(self, width, height):
-		self.reshape(width, height)
-		gl.glViewport(0, 0, width, height)
-
-	def _keyboard(self, key, x, y):
-		if key == b'\x1b':
-			glut.glutDestroyWindow(WINDOW)
-		else:
-			self.keyboard(key, x, y)
+		while not glfw.window_should_close(self.window):
+			gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+			now = time()
+			dt = now-self.last_frame
+			glfw.set_window_title(self.window, f"{self.title} - {int(1/dt)} fps")
+			self.update(dt)
+			self.last_frame = now
+			glfw.poll_events()
+			glfw.swap_buffers(self.window)
+		glfw.terminate()
 
 	def update(self, dt):
 		for i in range(50):
 			self.batch.draw(i*100, i*100, 1*100, 1*100, 1, 0, 1, 1)
 		self.batch.flush()
+
+	def _close(self, window):
+		glfw.set_window_should_close(window, True)
+
+	def _reshape(self, window, width, height):
+		self.reshape(width, height)
+		gl.glViewport(0, 0, width, height)
+
+	def _keyboard(self, window, key, scancode, action, mods):
+		if key == 256:
+			self._close(window)
+		else:
+			self.keyboard(key, scancode, action, mods)
 
 	def mouse_click(self, *args):
 		print(args)
