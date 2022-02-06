@@ -8,10 +8,6 @@ from time import time
 
 # INITIALISATION
 glfw.init()
-#glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-#glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-#glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, gl.GL_TRUE)
-#glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 WINDOW = glfw.create_window(128, 128, "", None, None)
 glfw.make_context_current(WINDOW)
 
@@ -26,7 +22,6 @@ class Texture:
 		return Texture.from_data(img_data, img.size[0], img.size[1], *args)
 
 	def from_data(img_data, width, height, attach=0, wrap_s=gl.GL_CLAMP, wrap_t=gl.GL_CLAMP, filter_mag=gl.GL_NEAREST, filter_min=gl.GL_NEAREST, from_format=gl.GL_RGB, to_format=gl.GL_RGB):
-		print(img_data)
 		id = gl.glGenTextures(1)
 		gl.glActiveTexture(gl.GL_TEXTURE0+attach)
 		gl.glBindTexture(gl.GL_TEXTURE_2D, id)
@@ -218,8 +213,10 @@ class App:
 		glfw.set_window_should_close(window, True)
 
 	def _reshape(self, window, width, height):
-		self.reshape(width, height)
+		self.width = width
+		self.height = height
 		gl.glViewport(0, 0, width, height)
+		self.reshape(width, height)
 
 	def _keyboard(self, window, key, scancode, action, mods):
 		if key == 256:
@@ -228,11 +225,13 @@ class App:
 			self.keyboard(key, scancode, action, mods)
 
 	def mouse_click(self, *args):
-		print(args)
+		pass
 	def mouse_move(self, *args):
-		print(args)
+		pass
 	def keyboard(self, *args):
-		print(args)
+		pass
+	def reshape(self, *args):
+		pass
 
 
 base_vertex_shader = """
